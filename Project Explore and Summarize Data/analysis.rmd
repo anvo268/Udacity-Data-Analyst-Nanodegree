@@ -1,0 +1,841 @@
+Loan Data Analysis by Andrew Voorhees
+========================================================
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, packages}
+# Load all of the packages that you end up using in your analysis in this code
+# chunk.
+
+# Notice that the parameter "echo" was set to FALSE for this code chunk. This
+# prevents the code from displaying in the knitted HTML output. You should set
+# echo=FALSE for all code chunks in your file, unless it makes sense for your
+# report to show the code that generated a particular plot.
+
+# The other parameters for "message" and "warning" should also be set to FALSE
+# for other code chunks once you have verified that each plot comes out as you
+# want it to. This will clean up the flow of your report.
+
+library(ggplot2)
+#important that plyr is loaded before dplyr
+library(plyr)
+library(dplyr)
+library(scales)
+
+```
+
+```{r echo=FALSE, Load_the_Data}
+# Load the Data
+data = read.csv('prosperLoanData.csv', na.strings=c("", "NA"))
+
+```
+
+
+This report explores a dataset containing over 100,000 loans from the lending
+company Prosper. 
+
+# Univariate Plots Section
+
+
+```{r echo=FALSE, Univariate_Plots}
+dim(data)
+
+```
+
+Although there are 81 fields, I want to concern myself with only a limited 
+number of these for my analysis. The fields I chose to focus on were:
+
+1. CreditGrade
+2. ListingCreationDate
+3. Term 
+4. LoanStatus
+5. BorrowerAPR
+6. Prosper Rating
+7. ProsperScore
+8. ListingCategory
+9. BorrowerState
+10. CreditRangeLower / CreditRangeUpper
+11. StatedMonthlyIncome
+12. LoanOriginalAmount
+13. Investors
+
+
+```{r}
+keep = c('CreditGrade', 
+         'ListingCreationDate', 
+         'Term',
+         'BorrowerAPR',
+         'ProsperRating..numeric.', 
+         'ProsperScore',
+         'ListingCategory..numeric.',
+         'CreditScoreRangeLower',
+         'CreditScoreRangeUpper',
+         'StatedMonthlyIncome',
+         'LoanOriginalAmount',
+         'Investors')
+data = data[keep]
+
+str(data)
+```
+
+Next I want to do some basic data wrangling to organize my data. 
+
+```{r}
+# Want Credit Grade to be an ordered Factor
+data$CreditGrade = factor(data$CreditGrade, 
+                          ordered=T, 
+                          levels=c("AA", "A", "B", "C",
+                                   "D",  "E",  "HR", "NC"))
+# Creation date
+data$ListingCreationDate = as.Date(data$ListingCreationDate)
+data$CreationMonth = as.Date(cut(data$ListingCreationDate, breaks='month'))
+
+p_levels = unique(sort(format(as.Date(data$ListingCreationDate), '%m')))
+data$NumericMonth = factor(format(as.Date(data$ListingCreationDate), 
+                                          '%m'), 
+                                   ordered=TRUE, 
+                                   levels=p_levels)
+# Term is probably more accurately reflected as an ordered factor as well
+data$Term = factor(data$Term, ordered=TRUE, levels=c(12, 36, 60))
+#Renaming ProsperRating and setting as a factor
+names(data)[names(data) == 'ProsperRating..numeric.'] = 'ProsperRating'
+data$ProsperRating = factor(data$ProsperRating, ordered=TRUE, levels=seq(1, 7, 1))
+# Ordered factor for Prosper Score
+data$ProsperScore = factor(data$ProsperScore, ordered=TRUE, levels=seq(1, 11, 1))
+# Rename listing category and map to actual concepts
+names(data)[names(data) == 'ListingCategory..numeric.'] = 'ListingCategory'
+p_from = seq(0, 20, 1)
+# this is frustrating, but I'm not sure there's a clearer way
+p_to = c('Not Available', 
+         'Debt Consolidation',
+         'Home Improvement', 
+         'Business',
+         'Personal Loan', 
+         'Student Use',
+         'Auto',
+         'Other',
+         'Baby&Adoption',
+         'Boat', 
+         'Cosmetic Procedure', 
+         'Engagement Ring', 
+         'Green Loans',
+         'Household Expenses',
+         'Large Purchases',
+         'Medical/Dental', 
+         'Motorcycle',
+         'RV', 
+         'Taxes',
+         'Vacation',
+         'Wedding Loans')
+
+data$ListingCategory = factor(mapvalues(data$ListingCategory, 
+                                        from = p_from, 
+                                        to = p_to), 
+                              levels=p_to)
+data$CreditScore = (data$CreditScoreRangeUpper + data$CreditScoreRangeLower) / 2
+data$CreditScoreRangeUpper = NULL 
+data$CreditScoreRangeLower = NULL 
+```
+
+Great, so what does our data look like now?
+
+```{r}
+str(data)
+```
+
+
+```{r}
+summary(data)
+```
+
+# Univariate Analysis Plots
+
+```{r}
+ggplot(aes(x=Investors), data=data) + 
+  geom_histogram(boundary=0)  
+```
+
+Intuitively, having a number of investors already paired with a loan might 
+encourage further investment. This indicates that the number of investors might 
+follow a multiplicative process. I'll take a log transformation to better grasp 
+the distribution. 
+
+```{r}
+ggplot(aes(x=Investors), data=data) + 
+  geom_histogram(boundary=0) + 
+  scale_x_log10()
+
+```
+
+Interesting, so if you throw out the common case where there are zero
+investors, the distribution appears roughly normal or skewed normal. Definitely 
+want to look at that peak on the far left though
+
+
+```{r}
+sort(table(data$Investors), decreasing=TRUE)[1:5]
+```
+
+The peak at the beginning is one of the issues with taking logs of counts. 
+When the # of investors is 1, the log of that value is 0 which screws 
+with my distribution quite a bit. 
+
+
+Next I want to look into what credit grade is assigned to most of the listings. 
+
+
+```{r}
+ggplot(aes(x=CreditGrade), data=subset(data, !is.na(CreditGrade))) + 
+  geom_bar()
+```
+
+It would appear that most listings fall int he middle with a 'C' grade, 
+although there are a significant number in all grades. 
+
+When was Prosper's platform most popular? Is there a time when most of the 
+listings were created?
+
+```{r}
+ggplot(aes(x=CreationMonth, group=1), data=data) + 
+  geom_point(stat='count') + 
+  geom_line(stat='count') + 
+  scale_x_date(labels = date_format('%Y-%m'),
+               date_breaks = '6 month',
+               limits = c(as.Date('2005-6-1'), as.Date('2014-12-1'))) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+There appears a sharp drop off in early to mid 2008 indicating an impact from
+the recession. There is also a sharp drop off in early 2014, and it might be
+useful to read up on the company and examine the possible cause. I don't see
+a clear monthly pattern, but I'll check the distribution just in case. 
+
+
+```{r}
+ggplot(aes(x=NumericMonth), data=data) +
+  geom_bar()
+
+```
+
+Next we'll check the frequency of different term lengths for the loans.
+
+```{r}
+ggplot(aes(x=Term), data=data) + geom_bar()
+
+```
+
+It looks like the vast majority of loans are 36 month (3 year) loans, with 
+very few being a 12 month loan. It might be interesting later to look at the
+relationship between loan term and the amount.
+
+
+```{r}
+ggplot(aes(x=BorrowerAPR), data=data) + geom_histogram(boundary=0)
+
+```
+
+```{r}
+summary(data$BorrowerAPR)
+```
+
+The APR distribution appears to have a couple of distinct peaks with a few 
+clear outliers at the high and low end. 
+
+```{r}
+ggplot(aes(x=ProsperRating), data=subset(data, !is.na(ProsperRating))) +
+         geom_bar()
+```
+
+```{r}
+ggplot(aes(x=ProsperScore), data=subset(data, !is.na(ProsperScore))) +
+         geom_bar()
+```
+
+```{r}
+summary(data$ListingCategory)
+```
+
+I want to look only at the most popular listing categories
+
+
+```{r}
+sub_data = subset(data, !is.na(ListingCategory) &
+                     ListingCategory != 'Other' &
+                     ListingCategory != 'Not Available')
+
+categories = names(sort(table(sub_data$ListingCategory), decreasing = T)[1:5])
+
+ggplot(aes(x=ListingCategory), 
+       data=subset(data, ListingCategory %in% categories)) + 
+  geom_bar()
+```
+
+Clearly Debt Consolidation is by far the most popular use for Prosper. 
+
+```{r}
+summary(data$StatedMonthlyIncome)
+```
+
+I would like to be the guy who makes 175K a month
+
+
+```{r}
+ggplot(aes(x=StatedMonthlyIncome), data=data) + 
+  geom_histogram(boundary=0)
+```
+
+Hmm, I going to go ahead an ignore the top 1% of values because that is 
+cleary skewing the distribution. 
+
+```{r}
+ggplot(aes(x=StatedMonthlyIncome), data=data) + 
+  geom_histogram(boundary=0) + 
+  xlim(0, quantile(data$StatedMonthlyIncome, .99))
+```
+
+It looks like either a log normal or exponential distribution. I'll take a 
+log transformation to try and get a better idea of the data
+
+```{r}
+ggplot(aes(x=StatedMonthlyIncome), data=data) + 
+  geom_histogram(binwidth = .1) + 
+  xlim(0, quantile(data$StatedMonthlyIncome, .99)) + 
+  scale_x_log10()
+```
+
+Now we're looking roughly normal with a few clear outliers and a low standard
+deviation
+
+I want to look into the high and low outliers that to see if there is 
+anything weird going on. 
+
+```{r}
+head(data[order(data$StatedMonthlyIncome),])
+```
+
+A large number of people list their monthly income as 0, which screws with the
+log distribution. After examining the orignal dataframe, it's difficult to tell 
+whether this data is a mistake or not, so we'll just take it at face value. 
+
+```{r}
+tail(data[order(data$StatedMonthlyIncome),])
+```
+
+
+
+
+```{r}
+ggplot(aes(x=LoanOriginalAmount), data=data) + 
+  geom_histogram(binwidth = 3000, boundary=0)
+```
+
+Not a clear distribution for loan amount, but it appears as though it could be
+normal. I'll look at the distribution of the log value just to see how it looks. 
+
+```{r}
+ggplot(aes(x=LoanOriginalAmount), data=data) + 
+  geom_histogram(binwidth = .1) + 
+  scale_x_log10()
+```
+
+Original loan amount doesn't really fit very neatly into a distribution. 
+
+
+CreditScore:
+
+```{r}
+ggplot(aes(x=CreditScore), data=data) + geom_histogram()
+```
+
+Distribution appears roughly normal. It seems safe to assume that when the 
+credit score is 0, that's a case where the data is simply incomplete. 
+
+# Univariate Analysis
+
+### What is the structure of your dataset?
+
+There are 113,937 observations with 81 different features, however I chose to
+for this analysis I made some basic transformations and chose to focus on 12 
+of them. 
+
+* CreditGrade
+* ListingCreationDate 
+* CreationMonth
+* Term
+* BorrowerAPR
+* ProsperRating
+* ProsperScore
+* ListingCategory
+* CreditScore
+* StatedMonthlyIncome
+* LoanOriginalAmount
+* Investors
+
+I chose to treat the variables Term, ProsperRating, and ProsperScore as ordered 
+factors. The ordering is obvious as they are all whole numbers from 1 to the 
+max level for the factor. ListingCategory is an unordered factor with 21 levels. 
+
+Other observations: 
+
+* Most loans have a small number of investors with 0 being most common. 
+* Credit grades are pretty evenly distributed, although B,C, and D are more 
+typical. 
+* There was a drop off in listings with the recession and in general the service
+has become more popular over time. 
+* There is no pattern for creation month.
+* The vast majority of loans have a 36 month term. 
+* BorrowerAPR is normally distributed. 
+* By far the most common listing category is "Debt Consolidation"
+
+### What is/are the main feature(s) of interest in your dataset?
+
+The main features of interest are BorrowerAPR and factors that intuitively 
+correlate with risk, with the core one being CreditScore. 
+
+### What other features in the dataset do you think will help support your \
+investigation into your feature(s) of interest?
+
+I think that ProsperRating, ProsperScore, and CreditGrade are all important
+factors in determining BorrowerAPR. I cannot say with certainty which will be 
+most influential. 
+
+### Did you create any new variables from existing variables in the dataset?
+
+I averaged the high credit score and the low credit score in order to create a 
+single numeric credit score. I also found the month for each listing creation 
+date to look for any patterns. 
+
+### Of the features you investigated, were there any unusual distributions? \
+Did you perform any operations on the data to tidy, adjust, or change the form \
+of the data? If so, why did you do this?
+
+A number of the features were clearly exponential distributions. When analyzing 
+relationships, it is generally more informative when a variable is normally
+distributed. For these variables I looked at the log of the distribution. Eg:
+
+* Investors
+* StatedMonthlyIncome (Also want to exclude very low values)
+* LoanOriginalAmount
+
+# Bivariate Plots Section
+
+```{r echo=FALSE, Bivariate_Plots}
+sample = data[sample(nrow(data), 1000), ]
+pairs(sample)
+```
+
+This is pretty noisy so I'll look into relationships with individual plots. 
+
+First I want to look more closely at the impact of CreditGrade. For these plots
+I'll exclude 'NA' and 'NC' grades, considering them incomplete data. 
+
+```{r}
+credit_grade_idx = (data$CreditGrade != 'NC') & (!is.na(data$CreditGrade))
+ggplot(aes(x=CreditGrade, y=BorrowerAPR), data=data[credit_grade_idx, ]) + 
+  geom_boxplot()
+```
+
+As expected, loans with better credit grades resulted in a lower rate for the 
+borrower. However, for all cases there are borrowers that represent significant
+outliers. I will look into these outlying observations later in the analysis. 
+
+
+I also want to see if there is a relationship between the Term of the loan 
+and the rate borrowers pay. Intuitively you might expect borrowers with longer
+loan periods to pay a lower rate. 
+
+```{r}
+ggplot(aes(x=Term, y=BorrowerAPR), data=data) + 
+  geom_boxplot()
+```
+
+It's interesting we see almost no difference in APR between different term 
+periods. However, it is worth noting that the 60 month loans have a much lower
+spread than the shorter loans. For concrete numbers here are the standard 
+deviations: 
+
+```{r}
+apr_idx = !is.na(data$BorrowerAPR)
+by(data[apr_idx,]$BorrowerAPR, data[apr_idx,]$Term, sd)
+```
+
+And interquartile ranges:
+
+```{r}
+by(data[apr_idx,]$BorrowerAPR, data[apr_idx,]$Term, IQR)
+```
+
+Prosper Rating: 
+
+```{r}
+rating_idx = !is.na(data$ProsperRating)
+ggplot(aes(x=ProsperRating, y=BorrowerAPR), data=data[rating_idx,]) + 
+  geom_boxplot()
+```
+
+As you might expect, higher ratings pay a lower APR and the differences appear
+pretty significant. What is surprising is the huge number of outliers, 
+especially for the lowest rating. 
+
+ProsperScore:
+
+```{r}
+score_idx = !is.na(data$ProsperScore)
+ggplot(aes(x=ProsperScore, y=BorrowerAPR), data=data[score_idx, ]) + 
+  geom_boxplot()
+```
+
+The general pattern is consistent with what you might expect, but there is quite 
+a bit more variability than with ProsperRating. Clearly many investors have 
+different feelings about the level of risk assigned to loans than Prosper. 
+
+ListingCategory: 
+
+```{r}
+listing_idx = (!is.na(data$ListingCategory) & 
+                 (data$ListingCategory != 'Not Available'))
+ggplot(aes(x=ListingCategory, y=BorrowerAPR), data=data[listing_idx, ]) + 
+  geom_boxplot() + 
+  theme(axis.text.x = element_text(angle = -90, hjust = 0, vjust = 0))
+```
+
+In general, the listing category doesn't seem to have a big impact on the apr
+the borrower pays. What interesting however are the two apparrent exceptions
+with personal loans paying a lower apr and cosmetic procedures paying a higher
+apr. Perhaps this says something about the biases of the lenders. 
+
+StatedMonthlyIncome:
+
+Next we'll look at a continuous variable. 
+
+```{r}
+income_idx = !is.na(data$StatedMonthlyIncome)
+ggplot(aes(x=StatedMonthlyIncome, y=BorrowerAPR), 
+       data=data[income_idx, ]) + 
+  geom_point()
+```
+
+Recall from the histogram of income that a few very high values skew the 
+distribution. I'll remove those to get a better idea of the relationship. 
+
+```{r}
+ggplot(aes(x=StatedMonthlyIncome, y=BorrowerAPR), 
+       data=data[income_idx, ]) + 
+  geom_point() + 
+  xlim(0, quantile(data$StatedMonthlyIncome, .99))
+```
+
+A lot of incomes and APRs clearly are set to neat values. I'll jitter the points
+to help get a clearer picture as well as increase the transparency. 
+
+```{r}
+income_log_idx = data$StatedMonthlyIncome > 1
+ggplot(aes(x=StatedMonthlyIncome, y=BorrowerAPR), 
+       data=data[income_idx & income_log_idx, ]) + 
+  geom_point(alpha=.01, position = 'jitter') + 
+  xlim(0, quantile(data$StatedMonthlyIncome, .99)) + 
+  geom_smooth()
+```
+
+There doesn't appear to be any relationship at all between income and APR. If
+anything there is a slight negative relationship. This is surprising to me, 
+but I suspect those with larger incomes also ask for larger loan amounts. I 
+would also like to try a simple log transformation, as earlier that helped 
+the income distribution appear more normal. 
+
+```{r}
+ggplot(aes(x=StatedMonthlyIncome, y=BorrowerAPR), 
+       data=data[income_idx, ]) + 
+  geom_point(alpha=.01, position = 'jitter') + 
+  #xlim(1, quantile(data$StatedMonthlyIncome, .99)) + 
+  scale_x_log10(limits=c(quantile(data$StatedMonthlyIncome, .05), 
+                         quantile(data$StatedMonthlyIncome, .99))) + 
+  geom_smooth()
+```
+
+LoanOriginalAmount:
+
+```{r}
+amount_idx = !is.na(data$LoanOriginalAmount)
+ggplot(aes(x=LoanOriginalAmount, y=BorrowerAPR), 
+       data=data[amount_idx, ]) + 
+  geom_point()
+```
+
+Again high density clusters of points and distinct verticals that are common. 
+I'll fade and jitter the points. 
+
+```{r}
+ggplot(aes(x=LoanOriginalAmount, y=BorrowerAPR), 
+       data=data[amount_idx, ]) + 
+  #geom_point(alpha=.01, position = 'jitter_x')
+  geom_jitter(alpha=.01, width=100) + 
+  geom_smooth()
+```
+
+There is a large amount of variability, but there does appear to be a slight 
+negative relationship between loan amount and borrower APR. I suspect this 
+is a result of wealthier borrowers taking out larger loans. We'll check that
+assumption quickly. 
+
+```{r}
+ggplot(aes(x=LoanOriginalAmount, y=StatedMonthlyIncome), 
+       data=data) + 
+  geom_point(position='jitter', alpha=.01) + 
+  ylim(0, quantile(data$StatedMonthlyIncome, .99)) + 
+  geom_smooth()
+```
+
+It's not perfect, but there's clearly a positionve linear relationship between
+income and loan amount which supports my theory. 
+
+
+Investors:
+
+```{r}
+investor_idx = !is.na(data$Investors)
+ggplot(aes(x=Investors, y=BorrowerAPR), data=data[investor_idx, ]) + 
+  geom_point()
+```
+
+In the univariate analysis it was clear that Investors follows an exponential
+relationship so I'll take a log transformation. I also want to exclude 
+cases with 0 investors. 
+
+```{r}
+ggplot(aes(x=Investors, y=BorrowerAPR), data=data[investor_idx, ]) + 
+  geom_point(alpha=.05, position='jitter') + 
+  scale_x_log10(limits=c(1, max(data$Investors)))
+```
+
+There isn't really a clear picture about the relationship between the number of
+investors and the APR. 
+
+CreditScore:
+(Assuming anything under 300 is a mistake)
+
+```{r}
+credit_score_idx = !is.na(data$CreditScore) & (data$CreditScore >= 300)
+ggplot(aes(x=CreditScore, y=BorrowerAPR), data=data[credit_score_idx, ]) + 
+  geom_point(position = 'jitter', alpha=.01) + 
+  geom_smooth(method='lm')
+```
+
+As expected, there appears to be a negative linear relationship between credit
+score and APR. 
+
+
+# Bivariate Analysis
+
+
+### Talk about some of the relationships you observed in this part of the \
+investigation. How did the feature(s) of interest vary with other features in \
+the dataset?
+
+Unsurprisingly, the different grading systems (CreditGrade, ProsperRating, 
+ProsperScore) were all strong predictors of BorrowerAPR, with ProsperScore
+being the least reliable. 
+
+The length of the loan (Term) does not appear to impact the BorrowerAPR. 
+
+ListingCategory seems not to matter much with the notable exceptions of 
+'Cosmetic Procedure' and 'Personal Loan'. 
+
+After removing outliers, there appears to be a weak negative linear relationship
+between StatedMonthlyIncome and BorrowerAPR. 
+
+There is also a weak negative linear relationship between LoanOriginalAmount 
+and BorrowerAPR. 
+
+Also there is a clear negative lineral relationship between CreditScore and 
+BorrowerAPR. 
+
+### Did you observe any interesting relationships between the other features \
+(not the main feature(s) of interest)?
+
+There is a strong positive relationship between StatedMonthlyIncome and 
+LoanOriginalAmount so I suspect having both in the model would be a solid 
+predictor of BorrowerAPR. 
+
+### What was the strongest relationship you found?
+
+The relationship between CreditScore and BorrowerAPR. Intuitively, this makes 
+a lot of sense. 
+
+# Multivariate Plots Section
+
+I want to explore the obvious outliers in my BorrowerAPR vs CreditGrade boxplots.
+Why are some borrowers with good credit grades receiving high APRs and vice 
+versa. 
+
+```{r echo=FALSE, Multivariate_Plots}
+ggplot(aes(x=CreditScore, y=BorrowerAPR), 
+       data=data[credit_score_idx & credit_grade_idx,]) + 
+  geom_point(position='jitter', alpha=.1, aes(color=CreditGrade)) + 
+  theme_gray() + 
+  scale_color_brewer(type='seq')
+```
+
+Including CreditScore doesn't help us explain the CreditGrade APR outliers. It 
+is clear from the clean color bands in the plot that CreditScore is almost 
+entirely determinite of CreditGrade with the bands becoming a little fuzzier for
+the lower credit scores. 
+
+```{r}
+sub_data = data[income_idx & income_log_idx & credit_grade_idx,]
+ggplot(aes(x=StatedMonthlyIncome, y=BorrowerAPR), data=sub_data) + 
+  geom_point(position='jitter', alpha=.3, aes(color=CreditGrade)) + 
+  xlim(0, quantile(sub_data$StatedMonthlyIncome, .99)) + 
+  scale_color_brewer(type='seq')
+
+```
+
+There actually doesn't appear to be a strong relationship between income and 
+borrower APR at all. It might be more interesting to look at loan amount 
+relative to income. 
+
+```{r}
+sub_data = data[income_idx & income_log_idx & credit_grade_idx,]
+ggplot(aes(x=LoanOriginalAmount/StatedMonthlyIncome, y=BorrowerAPR), 
+       data=sub_data) + 
+  geom_point(position='jitter', alpha=.3, aes(color=CreditGrade)) + 
+  xlim(0, 
+       quantile(sub_data$LoanOriginalAmount/sub_data$StatedMonthlyIncome, .99))+
+  scale_color_brewer(type='seq')
+```
+
+wh, so this is a little more informative. There appears to be a positive linear
+relationship between this ratio and and APR. Let's limit ourselves ot just 
+high credit grades. 
+
+```{r}
+idx = data$CreditGrade %in% c('AA', 'A')
+sub_data = data[income_idx & income_log_idx & credit_grade_idx & idx,]
+ggplot(aes(x=LoanOriginalAmount/StatedMonthlyIncome, y=BorrowerAPR), 
+       data=sub_data) + 
+  geom_point(position='jitter', alpha=.3, aes(color=CreditGrade)) + 
+  xlim(0, 
+       quantile(sub_data$LoanOriginalAmount/sub_data$StatedMonthlyIncome, .99)) +
+  geom_smooth(method='lm')
+
+```
+
+It looks like the ratio of the loan to income helps to explain at least part of 
+the reason borrowers with a high credit grade might be given a higher APR. This
+is especially true for high credit grade borrowers. 
+
+Let's also see if time when the loan is given has an impact on APR. 
+
+```{r}
+ggplot(aes(x=CreationMonth, y=BorrowerAPR), 
+       data=data[credit_grade_idx,]) + 
+  geom_point(position='jitter', alpha=.1, aes(color=CreditGrade))  
+```
+
+There's definitely a weird cap on higher APR rates for low credit grade
+borrowers during the midst of the recession. 
+
+# Multivariate Analysis
+
+### Talk about some of the relationships you observed in this part of the \
+investigation. Were there features that strengthened each other in terms of \
+looking at your feature(s) of interest?
+
+It appears that a borrower's credit grade is almost entirely a function of their
+averaged credit score. However, this doesn't entirely explain some of the 
+weird outliers. One possible explantion appeared to be the loan to income 
+ratio. 
+
+### Were there any interesting or surprising interactions between features?
+
+It was surprising how perfectly credit grade maps to credit score. I would have
+thought Prosper used a more sophisticated mdoel. 
+
+### OPTIONAL: Did you create any models with your dataset? Discuss the \
+strengths and limitations of your model.
+
+I used a basic linear regression to model the relationship between APR and
+the loan amount to income ratio for high credit grade borrowers. 
+
+------
+
+# Final Plots and Summary
+
+
+### Plot One
+```{r echo=FALSE, Plot_One}
+listing_idx = (!is.na(data$ListingCategory) & 
+                 (data$ListingCategory != 'Not Available'))
+ggplot(aes(x=ListingCategory, y=BorrowerAPR), data=data[listing_idx, ]) + 
+  geom_boxplot() + 
+  theme(axis.text.x = element_text(angle = -90, hjust = 0, vjust = 0)) +
+  ggtitle('Borrower APR by Listing Category')
+```
+
+### Description One
+
+Although the listing category may not be the most informative feature for most 
+loans, I though it was interesting because of the outliers. It's clear that the
+lending market is not kind to those taking out loans for "cosmetic procedures", 
+but there is often times a discount for something as generic as "personal use". 
+
+### Plot Two
+```{r echo=FALSE, Plot_Two}
+credit_score_idx = !is.na(data$CreditScore) & (data$CreditScore >= 300)
+ggplot(aes(x=CreditScore, y=BorrowerAPR), data=data[credit_score_idx, ]) + 
+  geom_point(position = 'jitter', alpha=.01) + 
+  geom_smooth(method='lm') + 
+  ggtitle('Borrower APR vs Credit Score')
+
+```
+
+### Description Two
+
+Unsurprisingly one of the best predictors of a borrower's APR is their credit 
+score. It just demonstrates that even on more modern lending platforms, it's 
+still important to carefully manage your credit. 
+
+
+### Plot Three
+```{r echo=FALSE, Plot_Three}
+idx = data$CreditGrade %in% c('AA', 'A')
+sub_data = data[income_idx & income_log_idx & credit_grade_idx & idx,]
+ggplot(aes(x=LoanOriginalAmount/StatedMonthlyIncome, y=BorrowerAPR), 
+       data=sub_data) + 
+  geom_point(position='jitter', alpha=.3, aes(color=CreditGrade)) + 
+  xlim(0, 
+       quantile(sub_data$LoanOriginalAmount/sub_data$StatedMonthlyIncome, .99)) +
+  geom_smooth(method='lm') + 
+  xlab('Loan Amount to Income') +
+  ggtitle('Borrower APR for top Credit Grades by Loan Amount to Income Ratio')
+```
+
+### Description Three
+
+This plot shows the impact of a borrower's loan amount to income ratio on APR.
+It demonstrates that people who borrow a lot realtive to their monthly income
+can expect to pay a higher APR. 
+
+------
+
+# Reflection
+
+The Prosper dataset contains over 100,000 loans with 81 different features for
+each loan. In my project, I chose to focus on only a small subset of those 
+features. First I plotted the distribution of each feature individually in order
+to get a feel for my data and look for potential outliers or oddities. 
+
+Next I looked into what factors determined the APR for an individual borrower. 
+Unsurprisingly, I found the Prosper rating systems such as Credit Grade, Prosper
+Rating, and Prosper Score were all strong indicators of what APR a borrower 
+might pay. Additionally, credit score was strongly correlated with APR. 
+However, there were numerous outliers and I wanted to examine how these
+occurred. I found that borrowers with high credit grades who still borrowed a
+large amount relative to their monthly incomes were likely to pay a higher APR 
+than you might otherwise expect. 
+
+There are obvious limitation with the conclusions I draw. First, I only looked 
+at a very small subset of the total number of features. There could be much 
+stronger correlations and patterns that I'm not seeing. Second, my final plots
+only looked at Credit Grade, which only exists up till 2009, so I'm looking
+at only a subset of my data. Given that there are so many variables that can 
+affect APR, in the future I might look into outside economic indicators such
+as Fed interest rates to see if those cause some of the noise in my data.
