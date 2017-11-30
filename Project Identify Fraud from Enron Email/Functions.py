@@ -49,17 +49,20 @@ from imblearn.pipeline import Pipeline as imb_pipeline
 import seaborn as sns
 import matplotlib.pyplot as plt
 
+# Added later so results can be replicable
+# Set to None and functions that use this will use their default random state
+RANDOM_STATE = 1
+
 # Variables
 base_pipeline = [
                  ('imputer', Imputer(strategy='median')), 
-                 ('resampling', SMOTE()),
-#                  ('selection', RFECV(estimator=LogisticRegression(), scoring='f1')),
+                 ('resampling', SMOTE(random_state=RANDOM_STATE)),
                  ('selection', SelectKBest(score_func=f_classif)),
                  ('scaler', StandardScaler()), 
                  ('pca', PCA())
                 ]
 
-# Stuff we want to test for each model before doing careful tunign
+# Stuff we want to test for each model before doing careful tuning
 base_param_grid = {
                   'scaler': [None, StandardScaler()], 
                   'selection__k': [7, 10, 15],
@@ -82,8 +85,7 @@ financial_features = ['salary',
                       'director_fees'] 
 
 email_features = ['to_messages', 
-#                  'email_address', 
-                 'from_poi_to_this_person', 
+                 'from_poi_to_this_person',
                  'from_messages', 
                  'from_this_person_to_poi', 
                  'shared_receipt_with_poi'] 
@@ -123,7 +125,7 @@ def model_metrics(X, y, pipeline):
     for i in range(N):
         scores = cross_validate(pipeline, X, y,
             scoring=scoring,
-            cv=RepeatedStratifiedKFold(n_splits=3))
+            cv=RepeatedStratifiedKFold(n_splits=3, random_state = RANDOM_STATE),)
         acr = np.append(acr, scores['test_acr'])
         prec = np.append(prec, scores['test_prec'])
         rec = np.append(rec, scores['test_rec'])
@@ -145,7 +147,7 @@ def show_confusion_matrix(X, y, model):
     # Repeat N times for more consistent results
     for i in range(N):
         # Making the confusion matrix
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=.3)
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=.3, random_state=RANDOM_STATE)
 
         model.fit(X_train, y_train)
         predicted = model.predict(X_test)
@@ -180,7 +182,7 @@ def print_model_info(grid):
 def evaluate_model(model, param_grid, X, y, optimize='f1'):
     """Gives a full evaluation of a given model"""
     grid = GridSearchCV(model, param_grid, scoring=optimize, 
-    	cv=RepeatedStratifiedKFold(n_splits=3))
+    	cv=RepeatedStratifiedKFold(n_splits=3, random_state=RANDOM_STATE))
     grid.fit(X, y);
     model = grid.best_estimator_
     
