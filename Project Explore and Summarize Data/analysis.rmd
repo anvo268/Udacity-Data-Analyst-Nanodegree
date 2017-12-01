@@ -22,6 +22,13 @@ library(scales)
 
 ```
 
+```
+{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.width=12, fig.height=8, fig.path='Figs/',
+echo=FALSE,warning=FALSE, message=FALSE)
+
+``` 
+
 ```{r echo=FALSE, Load_the_Data}
 # Load the Data
 data = read.csv('prosperLoanData.csv', na.strings=c("", "NA"))
@@ -669,7 +676,7 @@ versa.
 ```{r echo=FALSE, Multivariate_Plots}
 ggplot(aes(x=CreditScore, y=BorrowerAPR), 
        data=data[credit_score_idx & credit_grade_idx,]) + 
-  geom_point(position='jitter', alpha=.1, aes(color=CreditGrade)) + 
+  geom_point(position='jitter', alpha=1, aes(color=CreditGrade)) + 
   theme_gray() + 
   scale_color_brewer(type='seq')
 ```
@@ -682,7 +689,7 @@ the lower credit scores.
 ```{r}
 sub_data = data[income_idx & income_log_idx & credit_grade_idx,]
 ggplot(aes(x=StatedMonthlyIncome, y=BorrowerAPR), data=sub_data) + 
-  geom_point(position='jitter', alpha=.3, aes(color=CreditGrade)) + 
+  geom_point(position='jitter', alpha=1, aes(color=CreditGrade)) + 
   xlim(0, quantile(sub_data$StatedMonthlyIncome, .99)) + 
   scale_color_brewer(type='seq')
 
@@ -696,7 +703,7 @@ relative to income.
 sub_data = data[income_idx & income_log_idx & credit_grade_idx,]
 ggplot(aes(x=LoanOriginalAmount/StatedMonthlyIncome, y=BorrowerAPR), 
        data=sub_data) + 
-  geom_point(position='jitter', alpha=.3, aes(color=CreditGrade)) + 
+  geom_point(position='jitter', alpha=1, aes(color=CreditGrade)) + 
   xlim(0, 
        quantile(sub_data$LoanOriginalAmount/sub_data$StatedMonthlyIncome, .99))+
   scale_color_brewer(type='seq')
@@ -727,7 +734,8 @@ Let's also see if time when the loan is given has an impact on APR.
 ```{r}
 ggplot(aes(x=CreationMonth, y=BorrowerAPR), 
        data=data[credit_grade_idx,]) + 
-  geom_point(position='jitter', alpha=.1, aes(color=CreditGrade))  
+  geom_point(position='jitter', alpha=1, aes(color=CreditGrade)) + 
+  scale_color_brewer(type='seq')
 ```
 
 There's definitely a weird cap on higher APR rates for low credit grade
